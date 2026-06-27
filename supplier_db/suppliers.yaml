@@ -1,0 +1,19 @@
+# Local price-list directory. Can be overridden at runtime:
+# SUPPLIER_PRICELIST_DIR=/path/to/pricelists python3 supplier_db/build_supplier_db.py
+price_root: ../wine_finder_bot/pricelists
+
+# Only Excel files are imported in v1.
+include_patterns:
+  - "*.xlsx"
+  - "*.xls"
+
+# Optional manual supplier/file rules. Leave empty to auto-discover one supplier
+# per Excel file, using the file name as the supplier name.
+suppliers: []
+
+# Optional aliases can be extended manually later.
+aliases:
+  supplier: {}
+  producer: {}
+  country: {}
+  region: {}
