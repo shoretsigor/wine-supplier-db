@@ -317,9 +317,21 @@ def column_score(header: str, kind: str) -> int:
     h = normalize_text(header)
     if not h:
         return 0
+    h_tokens = set(h.split())
     patterns = {
         "name": ["наименование", "номенклатура", "designation", "товар назв", "название"],
-        "alt_name": ["наименование на английском", "латинское", "английском", "eng name", "name english"],
+        "alt_name": [
+            "наименование на английском",
+            "наименование англ",
+            "наименование лат",
+            "название sku англ",
+            "латинское",
+            "английском",
+            "англ",
+            "лат",
+            "eng name",
+            "name english",
+        ],
         "price": ["цена", "прайс", "руб", "rub", "price", "бпл", "руб бут"],
         "vintage": ["год урожая", "винтаж", "vintage", "год"],
         "volume": ["объем", "обьем", "литраж", "volume", "емк", "емкость"],
@@ -332,17 +344,52 @@ def column_score(header: str, kind: str) -> int:
     score = 0
     for pattern in patterns[kind]:
         pattern = normalize_text(pattern)
-        if pattern in h:
+        matched = pattern in h_tokens if len(pattern) <= 4 else pattern in h
+        if matched:
             score += 10 if h == pattern else 6
     if kind == "price" and any(bad in h for bad in ("остаток", "наличие", "stock")):
         score -= 8
     if kind == "name" and any(bad in h for bad in ("фото", "ссылка", "штрихкод")):
         score -= 8
+    if kind == "name" and ({"англ", "лат", "английском", "латинское", "english"} & h_tokens) and "рус" not in h_tokens:
+        score -= 12
+    if kind == "name" and "рус" in h_tokens:
+        score += 8
     return score
 
 
 def detect_columns(df: pd.DataFrame, header_row: int, manual: dict[str, Any] | None = None) -> dict[str, int | None]:
     manual = manual or {}
+    if header_row < 0:
+        result: dict[str, int | None] = {
+            "name": None,
+            "alt_name": None,
+            "price": None,
+            "vintage": None,
+            "volume": None,
+            "country": None,
+            "region": None,
+            "color": None,
+            "producer": None,
+            "grape": None,
+        }
+        for kind, value in manual.items():
+            if kind in result:
+                result[kind] = int(value)
+        if result.get("name") is None:
+            result["name"] = infer_name_column(df, 0)
+        if result.get("price") is None:
+            min_price_col = (result["name"] + 1) if result.get("name") is not None else 0
+            result["price"] = infer_price_column(df, 0, result.get("name"), min_price_col)
+        for kind in ("vintage", "volume"):
+            if result.get(kind) is None:
+                scored = sorted(
+                    ((content_column_score(df, 0, i, kind), -i, i) for i in range(df.shape[1])),
+                    reverse=True,
+                )
+                result[kind] = scored[0][2] if scored and scored[0][0] > 0 else None
+        return result
+
     headers: list[str] = []
     for col in range(df.shape[1]):
         parts = [cell_text(df.iat[header_row, col])] if header_row >= 0 else []
@@ -402,9 +449,11 @@ def infer_name_column(df: pd.DataFrame, start: int) -> int | None:
     return best[1] if best and best[0] > 100 else None
 
 
-def infer_price_column(df: pd.DataFrame, start: int, name_col: int | None) -> int | None:
+def infer_price_column(df: pd.DataFrame, start: int, name_col: int | None, min_col: int = 0) -> int | None:
     best: tuple[int, int] | None = None
     for col in range(df.shape[1]):
+        if col < min_col:
+            continue
         if col == name_col:
             continue
         score = 0
