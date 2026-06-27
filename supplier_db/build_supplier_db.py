@@ -319,6 +319,7 @@ def column_score(header: str, kind: str) -> int:
         return 0
     patterns = {
         "name": ["наименование", "номенклатура", "designation", "товар назв", "название"],
+        "alt_name": ["наименование на английском", "латинское", "английском", "eng name", "name english"],
         "price": ["цена", "прайс", "руб", "rub", "price", "бпл", "руб бут"],
         "vintage": ["год урожая", "винтаж", "vintage", "год"],
         "volume": ["объем", "обьем", "литраж", "volume", "емк", "емкость"],
@@ -330,6 +331,7 @@ def column_score(header: str, kind: str) -> int:
     }
     score = 0
     for pattern in patterns[kind]:
+        pattern = normalize_text(pattern)
         if pattern in h:
             score += 10 if h == pattern else 6
     if kind == "price" and any(bad in h for bad in ("остаток", "наличие", "stock")):
@@ -351,7 +353,7 @@ def detect_columns(df: pd.DataFrame, header_row: int, manual: dict[str, Any] | N
         headers.append(" ".join(parts))
 
     result: dict[str, int | None] = {}
-    for kind in ("name", "price", "vintage", "volume", "country", "region", "color", "producer", "grape"):
+    for kind in ("name", "alt_name", "price", "vintage", "volume", "country", "region", "color", "producer", "grape"):
         if kind in manual:
             result[kind] = int(manual[kind])
             continue
@@ -448,11 +450,20 @@ def reject_reason(raw_name: str, price: float | None, row_values: list[str]) -> 
     return None
 
 
-def split_producer_and_name(raw_name: str, producer_hint: str | None = None) -> tuple[str | None, str | None, str | None]:
+def split_producer_and_name(
+    raw_name: str,
+    producer_hint: str | None = None,
+    alt_name: str | None = None,
+) -> tuple[str | None, str | None, str | None]:
     name = re.sub(r"\s+", " ", raw_name).strip(" ,;")
+    combined = " ".join(part for part in [name, cell_text(alt_name)] if part)
     producer = cell_text(producer_hint) if producer_hint else ""
     if not producer:
-        if "/" in name:
+        chapoutier = re.search(r"\b(M\.?\s*Chapoutier|М\.?\s*Шапутье)\b", combined, re.IGNORECASE)
+        if chapoutier:
+            producer = chapoutier.group(1).replace("M.", "M. ").replace("М.", "М. ")
+            producer = re.sub(r"\s+", " ", producer).strip()
+        elif "/" in name:
             latin = name.split("/", 1)[1].split(",", 1)[0].strip()
             producer = " ".join(latin.split()[:3])
         else:
@@ -732,15 +743,17 @@ def process_sheet(conn: sqlite3.Connection, source: SourceRule, path: Path, shee
             continue
 
         producer_hint = cell_text(row_value(row, columns.get("producer")))
-        producer, wine_name, cuvee = split_producer_and_name(raw_name, producer_hint)
+        alt_name = cell_text(row_value(row, columns.get("alt_name")))
+        producer, wine_name, cuvee = split_producer_and_name(raw_name, producer_hint, alt_name)
         vintage, is_nv = parse_vintage(row_value(row, columns.get("vintage")), raw_name)
         volume_l = parse_volume(row_value(row, columns.get("volume")), raw_name)
         country = cell_text(row_value(row, columns.get("country"))) or None
         region = cell_text(row_value(row, columns.get("region"))) or None
         color = cell_text(row_value(row, columns.get("color"))) or None
         grape = cell_text(row_value(row, columns.get("grape"))) or None
-        normalized_name = normalize_text(raw_name)
-        search_tokens = token_list(raw_name, producer or "", wine_name or "", country or "", region or "")
+        indexed_name = " ".join(part for part in [raw_name, alt_name] if part)
+        normalized_name = normalize_text(indexed_name)
+        search_tokens = token_list(indexed_name, producer or "", wine_name or "", country or "", region or "")
         item = {
             "supplier": source.supplier,
             "source_file": path.name,
