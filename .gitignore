@@ -1,0 +1,25 @@
+.DS_Store
+.env
+.env.*
+!.env.example
+__pycache__/
+*.py[cod]
+
+# Raw supplier price lists are not committed to the public repository.
+*.xlsx
+*.xls
+*.csv
+*.tsv
+
+# Generated database/export artifacts.
+supplier_db/*.db
+supplier_db/*.sqlite
+supplier_db/*.sqlite3
+supplier_db/suppliers.json
+supplier_db/rejected_rows.csv
+supplier_db/build_report.csv
+supplier_db/aliases.json
+
+# Local scratch/output folders.
+work/
+outputs/
